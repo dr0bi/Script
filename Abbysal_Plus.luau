@@ -1751,7 +1751,6 @@ local Tabs = {
 	Visuals  = Window:AddTab("Visuals", "eye"),
 	Floors   = Window:AddTab("Floors", "earth"),
 	Archives  = Window:AddTab("Archives", "rbxassetid://104508835882225"),
-	Outdoors  = Window:AddTab("Outdoors", "earth"),
 	Stairwell = Window:AddTab("Stairwell", "rbxassetid://80017304328364"),
 	Optimization = Window:AddTab("Optimization", "settings"),
 }
@@ -2697,50 +2696,60 @@ Groupboxes.General_Health:AddButton({
 	end
 })
 
-Groupboxes.Outdoors_Bypass = Tabs.Outdoors:AddLeftGroupbox("Bypasses")
-Groupboxes.Outdoors_Bypass:AddToggle("BypassGroundskeeper", {
-	Text = "Bypass Groundskeeper", Default = false,
-	Tooltip = "Puts an invisible platform under you so you walk on it instead of the ground."
+Groupboxes.General_AntiVoid = Tabs.General:AddLeftGroupbox("Anti-Void")
+Groupboxes.General_AntiVoid:AddToggle("AntiVoidToggle", {
+	Text = "Anti-Void", Default = false,
+	Tooltip = "Reverts sudden teleports and pushes from the game or scripts, and rescues you from falling into the void. Your own walking still works."
 })
-local GroundskeeperPlatform
-local function RemoveGroundskeeperPlatform()
-	if GroundskeeperPlatform then
-		GroundskeeperPlatform:Destroy()
-		GroundskeeperPlatform = nil
+Groupboxes.General_AntiVoid:AddToggle("AntiVoidLock", {
+	Text = "Lock Position", Default = false,
+	Tooltip = "Freezes you completely in place (nothing can move you) until you turn this off."
+})
+Groupboxes.General_AntiVoid:AddSlider("AntiVoidStep", {
+	Text = "Max Step", Min = 2, Max = 50, Default = 8, Rounding = 0, Compact = true,
+	Tooltip = "Any move larger than this many studs in one frame is treated as a teleport and undone."
+})
+
+local AVRoot, AVLast, AVSafe, AVLockCF
+local function AntiVoidStep()
+	local Root = Character and Character:FindFirstChild("HumanoidRootPart")
+	if not Root or not Humanoid then AVRoot = nil return end
+	if Root ~= AVRoot then
+		AVRoot, AVLast, AVSafe, AVLockCF = Root, nil, nil, nil
+	end
+	local Lock = Toggles.AntiVoidLock.Value
+	if not Lock and not Toggles.AntiVoidToggle.Value then
+		AVLast, AVSafe, AVLockCF = nil, nil, nil
+		return
+	end
+	if Lock then
+		AVLockCF = AVLockCF or Root.CFrame
+		if (Root.Position - AVLockCF.Position).Magnitude > 0.05 then
+			Root.CFrame = AVLockCF
+			Root.AssemblyLinearVelocity = Vector3.zero
+			Root.AssemblyAngularVelocity = Vector3.zero
+		end
+		AVLast = AVLockCF
+		return
+	end
+	AVLockCF = nil
+	if AVLast and (Root.Position - AVLast.Position).Magnitude > Options.AntiVoidStep.Value then
+		Root.CFrame = AVLast
+		Root.AssemblyLinearVelocity = Vector3.zero
+	else
+		AVLast = Root.CFrame
+	end
+	if Humanoid.FloorMaterial ~= Enum.Material.Air then
+		AVSafe = Root.CFrame
+	end
+	if AVSafe and Root.Position.Y < AVSafe.Position.Y - 60 then
+		Root.CFrame = AVSafe + Vector3.new(0, 3, 0)
+		Root.AssemblyLinearVelocity = Vector3.zero
+		AVLast = Root.CFrame
 	end
 end
-Toggles.BypassGroundskeeper:OnChanged(function(Value)
-	if not Value then RemoveGroundskeeperPlatform() end
-end)
-Library:OnUnload(RemoveGroundskeeperPlatform)
-
-local PlatformRayParams = RaycastParams.new()
-PlatformRayParams.FilterType = Enum.RaycastFilterType.Exclude
-local PlatformY
-Connections.BypassGroundskeeper = Services.RunService.Heartbeat:Connect(function()
-	if not Toggles.BypassGroundskeeper.Value then return end
-	local Root = Character and Character:FindFirstChild("HumanoidRootPart")
-	if not Root then return end
-	if not GroundskeeperPlatform or not GroundskeeperPlatform.Parent then
-		GroundskeeperPlatform = Instance.new("Part")
-		GroundskeeperPlatform.Name = "GroundskeeperPlatform"
-		GroundskeeperPlatform.Size = Vector3.new(30, 1, 30)
-		GroundskeeperPlatform.Anchored = true
-		GroundskeeperPlatform.CanCollide = true
-		GroundskeeperPlatform.CanQuery = false
-		GroundskeeperPlatform.CanTouch = false
-		GroundskeeperPlatform.Transparency = 1
-		GroundskeeperPlatform.Parent = Services.Workspace
-	end
-	PlatformRayParams.FilterDescendantsInstances = { Character, GroundskeeperPlatform }
-	local Hit = Services.Workspace:Raycast(Root.Position, Vector3.new(0, -100, 0), PlatformRayParams)
-	if Hit then
-		PlatformY = Hit.Position.Y + 3.5
-	elseif not PlatformY then
-		PlatformY = Root.Position.Y - 3
-	end
-	GroundskeeperPlatform.CFrame = CFrame.new(Root.Position.X, PlatformY - 0.5, Root.Position.Z)
-end)
+Connections.AntiVoidRender = Services.RunService.RenderStepped:Connect(AntiVoidStep)
+Connections.AntiVoidBeat = Services.RunService.Heartbeat:Connect(AntiVoidStep)
 
 Groupboxes.Debug = Tabs.General:AddRightGroupbox("Debug")
 Groupboxes.Debug:AddButton({
