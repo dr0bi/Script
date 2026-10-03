@@ -2219,24 +2219,47 @@ Groupboxes.Self_Misc:AddButton({
 		end
 	end
 })
-Groupboxes.Self_Misc:AddButton({
-	Text = "Heal 50 HP",
-	Tooltip = "Adds 50 HP to your health (up to your max health).",
+Groupboxes.General_Health = Tabs.General:AddLeftGroupbox("Health")
+Groupboxes.General_Health:AddSlider("HealthAmountSlider", {
+	Text = "HP Amount", Min = 1, Max = 100, Default = 50, Rounding = 0, Compact = true,
+	Tooltip = "How much HP the buttons and Auto Heal add or subtract."
+})
+Groupboxes.General_Health:AddButton({
+	Text = "Heal",
+	Tooltip = "Adds the selected amount of HP (up to your max health).",
 	Func = function()
 		if Humanoid and Humanoid.Health > 0 then
-			Humanoid.Health = math.min(Humanoid.MaxHealth, Humanoid.Health + 50)
+			Humanoid.Health = math.min(Humanoid.MaxHealth, Humanoid.Health + Options.HealthAmountSlider.Value)
 		end
 	end
 })
-Groupboxes.Self_Misc:AddButton({
-	Text = "Subtract 25 HP",
-	Tooltip = "Subtracts 25 HP from your health.",
+Groupboxes.General_Health:AddButton({
+	Text = "Subtract",
+	Tooltip = "Subtracts the selected amount of HP.",
 	Func = function()
 		if Humanoid and Humanoid.Health > 0 then
-			Humanoid.Health = math.max(0, Humanoid.Health - 25)
+			Humanoid.Health = math.max(0, Humanoid.Health - Options.HealthAmountSlider.Value)
 		end
 	end
 })
+Groupboxes.General_Health:AddDivider()
+Groupboxes.General_Health:AddToggle("AutoHealToggle", {
+	Text = "Auto Heal", Default = false,
+	Tooltip = "Automatically heals the selected amount when your HP drops below the threshold."
+})
+Groupboxes.General_Health:AddSlider("AutoHealThreshold", {
+	Text = "Heal Below HP", Min = 1, Max = 100, Default = 50, Rounding = 0, Compact = true
+})
+local LastAutoHeal = 0
+Connections.AutoHeal = Services.RunService.Heartbeat:Connect(function()
+	if not Toggles.AutoHealToggle.Value then return end
+	if os.clock() - LastAutoHeal < 0.25 then return end
+	LastAutoHeal = os.clock()
+	if Humanoid and Humanoid.Health > 0 and Humanoid.Health < Options.AutoHealThreshold.Value then
+		Humanoid.Health = math.min(Humanoid.MaxHealth, Humanoid.Health + Options.HealthAmountSlider.Value)
+	end
+end)
+
 Groupboxes.Debug = Tabs.General:AddRightGroupbox("Debug")
 Groupboxes.Debug:AddButton({
 	Text = "Void",
