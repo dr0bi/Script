@@ -1751,6 +1751,7 @@ local Tabs = {
 	Visuals  = Window:AddTab("Visuals", "eye"),
 	Floors   = Window:AddTab("Floors", "earth"),
 	Archives  = Window:AddTab("Archives", "rbxassetid://104508835882225"),
+	Outdoors  = Window:AddTab("Outdoors", "earth"),
 	Stairwell = Window:AddTab("Stairwell", "rbxassetid://80017304328364"),
 	Optimization = Window:AddTab("Optimization", "settings"),
 }
@@ -2684,16 +2685,7 @@ Groupboxes.Self_Misc:AddButton({
 Groupboxes.General_Health = Tabs.General:AddLeftGroupbox("Health")
 Groupboxes.General_Health:AddSlider("HealthAmountSlider", {
 	Text = "HP Amount", Min = 1, Max = 100, Default = 50, Rounding = 0, Compact = true,
-	Tooltip = "How much HP the buttons and Auto Heal add or subtract."
-})
-Groupboxes.General_Health:AddButton({
-	Text = "Heal",
-	Tooltip = "Adds the selected amount of HP (up to your max health).",
-	Func = function()
-		if Humanoid and Humanoid.Health > 0 then
-			Humanoid.Health = math.min(Humanoid.MaxHealth, Humanoid.Health + Options.HealthAmountSlider.Value)
-		end
-	end
+	Tooltip = "How much HP the Subtract button removes."
 })
 Groupboxes.General_Health:AddButton({
 	Text = "Subtract",
@@ -2704,22 +2696,50 @@ Groupboxes.General_Health:AddButton({
 		end
 	end
 })
-Groupboxes.General_Health:AddDivider()
-Groupboxes.General_Health:AddToggle("AutoHealToggle", {
-	Text = "Auto Heal", Default = false,
-	Tooltip = "Automatically heals the selected amount when your HP drops below the threshold."
+
+Groupboxes.Outdoors_Bypass = Tabs.Outdoors:AddLeftGroupbox("Bypasses")
+Groupboxes.Outdoors_Bypass:AddToggle("BypassGroundskeeper", {
+	Text = "Bypass Groundskeeper", Default = false,
+	Tooltip = "Puts an invisible platform under you so you walk on it instead of the ground."
 })
-Groupboxes.General_Health:AddSlider("AutoHealThreshold", {
-	Text = "Heal Below HP", Min = 1, Max = 100, Default = 50, Rounding = 0, Compact = true
-})
-local LastAutoHeal = 0
-Connections.AutoHeal = Services.RunService.Heartbeat:Connect(function()
-	if not Toggles.AutoHealToggle.Value then return end
-	if os.clock() - LastAutoHeal < 0.25 then return end
-	LastAutoHeal = os.clock()
-	if Humanoid and Humanoid.Health > 0 and Humanoid.Health < Options.AutoHealThreshold.Value then
-		Humanoid.Health = math.min(Humanoid.MaxHealth, Humanoid.Health + Options.HealthAmountSlider.Value)
+local GroundskeeperPlatform
+local function RemoveGroundskeeperPlatform()
+	if GroundskeeperPlatform then
+		GroundskeeperPlatform:Destroy()
+		GroundskeeperPlatform = nil
 	end
+end
+Toggles.BypassGroundskeeper:OnChanged(function(Value)
+	if not Value then RemoveGroundskeeperPlatform() end
+end)
+Library:OnUnload(RemoveGroundskeeperPlatform)
+
+local PlatformRayParams = RaycastParams.new()
+PlatformRayParams.FilterType = Enum.RaycastFilterType.Exclude
+local PlatformY
+Connections.BypassGroundskeeper = Services.RunService.Heartbeat:Connect(function()
+	if not Toggles.BypassGroundskeeper.Value then return end
+	local Root = Character and Character:FindFirstChild("HumanoidRootPart")
+	if not Root then return end
+	if not GroundskeeperPlatform or not GroundskeeperPlatform.Parent then
+		GroundskeeperPlatform = Instance.new("Part")
+		GroundskeeperPlatform.Name = "GroundskeeperPlatform"
+		GroundskeeperPlatform.Size = Vector3.new(30, 1, 30)
+		GroundskeeperPlatform.Anchored = true
+		GroundskeeperPlatform.CanCollide = true
+		GroundskeeperPlatform.CanQuery = false
+		GroundskeeperPlatform.CanTouch = false
+		GroundskeeperPlatform.Transparency = 1
+		GroundskeeperPlatform.Parent = Services.Workspace
+	end
+	PlatformRayParams.FilterDescendantsInstances = { Character, GroundskeeperPlatform }
+	local Hit = Services.Workspace:Raycast(Root.Position, Vector3.new(0, -100, 0), PlatformRayParams)
+	if Hit then
+		PlatformY = Hit.Position.Y + 1.5
+	elseif not PlatformY then
+		PlatformY = Root.Position.Y - 3
+	end
+	GroundskeeperPlatform.CFrame = CFrame.new(Root.Position.X, PlatformY - 0.5, Root.Position.Z)
 end)
 
 Groupboxes.Debug = Tabs.General:AddRightGroupbox("Debug")
@@ -3249,135 +3269,6 @@ Groupboxes.Archives_Bypasses:AddToggle("AntiScribbles", { Text = "Bypass Scribbl
 
 Groupboxes.Archives_Experimental = Tabs.Archives:AddLeftGroupbox("Experimental")
 
-Groupboxes.Archives_AutoWalk = Tabs.Archives:AddRightGroupbox("Auto Walk")
-Groupboxes.Archives_AutoWalk:AddToggle("ArchivesAutoWalk", {
-	Text = "Auto Walk to Doors", Default = false,
-	Tooltip = "Pathfinds to each door and opens it. Teleports to the next door every N rooms."
-})
-Groupboxes.Archives_AutoWalk:AddSlider("ArchivesAutoWalkTeleportEvery", {
-	Text = "Teleport Every (rooms)", Min = 10, Max = 100, Default = 50, Rounding = 0, Compact = true
-})
-Groupboxes.Archives_AutoWalk:AddSlider("ArchivesAutoWalkStopRoom", {
-	Text = "Stop At Room", Min = 1, Max = 1300, Default = 1300, Rounding = 0, Compact = true
-})
-Groupboxes.Archives_AutoWalk:AddToggle("ArchivesAutoWalkDebug", {
-	Text = "Debug Messages", Default = false,
-	Tooltip = "Shows what Auto Walk is doing in notifications."
-})
-
-Globals.ArchivesAutoWalkActive = false
-local function AWDebug(Text)
-	if Toggles.ArchivesAutoWalkDebug.Value then
-		Functions.Notify({Title = "[Auto Walk] " .. Text})
-	end
-end
-
-local function ArchivesFindDoor(RoomNumber)
-	local Room = CurrentRooms:FindFirstChild(tostring(RoomNumber))
-	if not Room then return nil, nil end
-	local DoorModel = Room:FindFirstChild("Door")
-	if not DoorModel then return nil, nil end
-	local DoorPart = DoorModel:FindFirstChild("Door") or DoorModel.PrimaryPart or DoorModel:FindFirstChildWhichIsA("BasePart", true)
-	return DoorModel, DoorPart
-end
-
-local function ArchivesWalkTo(DoorModel, DoorPart, RoomNumber)
-	local Root = Character and Character:FindFirstChild("HumanoidRootPart")
-	if not Root or not Humanoid then return false end
-	local Target = DoorPart.Position
-	local Path = Services.PathfindingService:CreatePath({
-		AgentCanJump = true, AgentCanClimb = false, WaypointSpacing = 4,
-		AgentRadius = 1.5, AgentHeight = 1.5
-	})
-	local Success = pcall(function() Path:ComputeAsync(Root.Position, Target) end)
-	local Waypoints = Success and Path:GetWaypoints() or {}
-	if #Waypoints == 0 then
-		AWDebug("No path found, walking straight")
-		Waypoints = {{Position = Target, Action = Enum.PathWaypointAction.Walk}}
-	end
-
-	local RoomStart = os.clock()
-	for _, Waypoint in Waypoints do
-		if not Toggles.ArchivesAutoWalk.Value or Humanoid.Health <= 0 then return false end
-		if Waypoint.Action == Enum.PathWaypointAction.Jump then Humanoid.Jump = true end
-		Humanoid:MoveTo(Waypoint.Position)
-
-		local Start = os.clock()
-		local LastPos = Root.Position
-		local LastMove = os.clock()
-		while Toggles.ArchivesAutoWalk.Value and (Root.Position - Waypoint.Position).Magnitude > 3 and os.clock() - Start < 3 do
-			if (Root.Position - Target).Magnitude < 40 then
-				pcall(function() DoorModel.ClientOpen:FireServer() end)
-			end
-			if (Root.Position - LastPos).Magnitude > 0.5 then
-				LastPos = Root.Position
-				LastMove = os.clock()
-			elseif os.clock() - LastMove > 1 then
-				Humanoid.Jump = true
-				Humanoid:MoveTo(Waypoint.Position)
-			end
-			-- hard fallback: stuck in this room for too long, teleport to the door
-			if os.clock() - RoomStart > 15 then
-				AWDebug("Stuck, teleporting to door")
-				return false
-			end
-			task.wait()
-		end
-	end
-	return true
-end
-
-Connections.ArchivesAutoWalk = Services.RunService.Heartbeat:Connect(function()
-	if not Toggles.ArchivesAutoWalk.Value or Globals.ArchivesAutoWalkActive then return end
-	local RoomNumber = LatestRoom.Value
-	if RoomNumber >= Options.ArchivesAutoWalkStopRoom.Value then
-		Toggles.ArchivesAutoWalk:SetValue(false)
-		Functions.Notify({Title = "Auto Walk finished at room " .. RoomNumber})
-		return
-	end
-	if not Character or not Humanoid or Humanoid.Health <= 0 then return end
-
-	local DoorModel, DoorPart = ArchivesFindDoor(RoomNumber)
-	if not DoorPart then
-		if Globals.ArchivesAutoWalkLastMissing ~= RoomNumber then
-			Globals.ArchivesAutoWalkLastMissing = RoomNumber
-			AWDebug("No door found in room " .. RoomNumber)
-		end
-		return
-	end
-
-	Globals.ArchivesAutoWalkActive = true
-	task.spawn(function()
-		local OK, Err = pcall(function()
-			AWDebug("Room " .. RoomNumber)
-			local TeleportEvery = Options.ArchivesAutoWalkTeleportEvery.Value
-			local Reached = false
-			if RoomNumber > 0 and RoomNumber % TeleportEvery == 0 then
-				AWDebug("Teleporting to door " .. RoomNumber)
-			else
-				DoorPart.CanCollide = false
-				Reached = ArchivesWalkTo(DoorModel, DoorPart, RoomNumber)
-			end
-			if not Reached and Toggles.ArchivesAutoWalk.Value and Character then
-				Character:PivotTo(CFrame.new(DoorPart.Position + Vector3.new(0, 3, 0)))
-				task.wait(0.2)
-			end
-			for _ = 1, 10 do
-				pcall(function() DoorModel.ClientOpen:FireServer() end)
-				task.wait(0.1)
-			end
-			local Start = os.clock()
-			while Toggles.ArchivesAutoWalk.Value and LatestRoom.Value == RoomNumber and os.clock() - Start < 5 do
-				task.wait()
-			end
-			if LatestRoom.Value == RoomNumber then
-				AWDebug("Door " .. RoomNumber .. " did not open (locked?)")
-			end
-		end)
-		if not OK then AWDebug("Error: " .. tostring(Err)) end
-		Globals.ArchivesAutoWalkActive = false
-	end)
-end)
 
 
 Toggles.AntiClosetTrash:OnChanged(function(Value)
