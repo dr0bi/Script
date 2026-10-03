@@ -2712,28 +2712,6 @@ Groupboxes.General_Health:AddToggle("AutoHealToggle", {
 Groupboxes.General_Health:AddSlider("AutoHealThreshold", {
 	Text = "Heal Below HP", Min = 1, Max = 100, Default = 50, Rounding = 0, Compact = true
 })
-local GodModeHealth = 9999999999999999999999999
-local GodModeOriginalMax = 100
-Groupboxes.General_Health:AddToggle("GodModeToggle", {
-	Text = "God Mode", Default = false,
-	Tooltip = "Sets your max health and health to an extremely high value. Turning it off restores your normal max health.",
-	Callback = function(Value)
-		if not Value and Humanoid then
-			Humanoid.MaxHealth = GodModeOriginalMax
-			Humanoid.Health = math.min(Humanoid.Health, GodModeOriginalMax)
-		end
-	end
-})
-Connections.GodMode = Services.RunService.Heartbeat:Connect(function()
-	if not Toggles.GodModeToggle.Value then return end
-	if Humanoid and Humanoid.Health > 0 then
-		if Humanoid.MaxHealth ~= GodModeHealth then
-			GodModeOriginalMax = Humanoid.MaxHealth
-			Humanoid.MaxHealth = GodModeHealth
-		end
-		Humanoid.Health = GodModeHealth
-	end
-end)
 local LastAutoHeal = 0
 Connections.AutoHeal = Services.RunService.Heartbeat:Connect(function()
 	if not Toggles.AutoHealToggle.Value then return end
@@ -3270,6 +3248,83 @@ Groupboxes.Archives_Bypasses:AddToggle("BypassDrones",         { Text = "Bypass 
 Groupboxes.Archives_Bypasses:AddToggle("AntiScribbles", { Text = "Bypass Scribbles", Default = false, Tooltip = "Prevents 'Scribbles' from attacking you." })
 
 Groupboxes.Archives_Experimental = Tabs.Archives:AddLeftGroupbox("Experimental")
+
+Groupboxes.Archives_AutoWalk = Tabs.Archives:AddRightGroupbox("Auto Walk")
+Groupboxes.Archives_AutoWalk:AddToggle("ArchivesAutoWalk", {
+	Text = "Auto Walk to Doors", Default = false,
+	Tooltip = "Pathfinds to each door and opens it. Teleports to the next door every N rooms."
+})
+Groupboxes.Archives_AutoWalk:AddSlider("ArchivesAutoWalkTeleportEvery", {
+	Text = "Teleport Every (rooms)", Min = 10, Max = 100, Default = 50, Rounding = 0, Compact = true
+})
+Groupboxes.Archives_AutoWalk:AddSlider("ArchivesAutoWalkStopRoom", {
+	Text = "Stop At Room", Min = 1, Max = 1300, Default = 1300, Rounding = 0, Compact = true
+})
+
+Globals.ArchivesAutoWalkActive = false
+local function ArchivesWalkTo(TargetPosition)
+	local Root = Character and Character:FindFirstChild("HumanoidRootPart")
+	if not Root or not Humanoid then return end
+	local Path = Services.PathfindingService:CreatePath({
+		AgentCanJump = true, AgentCanClimb = false, WaypointSpacing = 4,
+		AgentRadius = 1.5, AgentHeight = 1.5
+	})
+	local Success = pcall(function() Path:ComputeAsync(Root.Position, TargetPosition) end)
+	local Waypoints = Success and Path:GetWaypoints() or {}
+	if #Waypoints == 0 then
+		Humanoid:MoveTo(TargetPosition)
+		local Start = os.clock()
+		while Toggles.ArchivesAutoWalk.Value and os.clock() - Start < 3 and (Root.Position - TargetPosition).Magnitude > 4 do
+			task.wait()
+		end
+		return
+	end
+	for _, Waypoint in Waypoints do
+		if not Toggles.ArchivesAutoWalk.Value or Humanoid.Health <= 0 then return end
+		if Waypoint.Action == Enum.PathWaypointAction.Jump then Humanoid.Jump = true end
+		Humanoid:MoveTo(Waypoint.Position)
+		local Start = os.clock()
+		while Toggles.ArchivesAutoWalk.Value and os.clock() - Start < 2 and (Root.Position - Waypoint.Position).Magnitude > 3 do
+			task.wait()
+		end
+	end
+end
+
+Connections.ArchivesAutoWalk = Services.RunService.Heartbeat:Connect(function()
+	if not Toggles.ArchivesAutoWalk.Value or Globals.ArchivesAutoWalkActive then return end
+	local RoomNumber = LatestRoom.Value
+	if RoomNumber >= Options.ArchivesAutoWalkStopRoom.Value then
+		Toggles.ArchivesAutoWalk:SetValue(false)
+		Functions.Notify({Title = "Auto Walk finished at room " .. RoomNumber})
+		return
+	end
+	local Room = CurrentRooms:FindFirstChild(tostring(RoomNumber))
+	local DoorModel = Room and Room:FindFirstChild("Door")
+	local DoorPart = DoorModel and DoorModel:FindFirstChild("Door")
+	if not DoorPart or not Character or not Humanoid or Humanoid.Health <= 0 then return end
+
+	Globals.ArchivesAutoWalkActive = true
+	task.spawn(function()
+		pcall(function()
+			local TeleportEvery = Options.ArchivesAutoWalkTeleportEvery.Value
+			if RoomNumber > 0 and RoomNumber % TeleportEvery == 0 then
+				Character:PivotTo(CFrame.new(DoorPart.Position + Vector3.new(0, 3, 0)))
+				task.wait(0.2)
+			else
+				DoorPart.CanCollide = false
+				ArchivesWalkTo(DoorPart.Position)
+			end
+			if DoorModel:FindFirstChild("ClientOpen") then
+				pcall(function() DoorModel.ClientOpen:FireServer() end)
+			end
+			local Start = os.clock()
+			while Toggles.ArchivesAutoWalk.Value and LatestRoom.Value == RoomNumber and os.clock() - Start < 5 do
+				task.wait()
+			end
+		end)
+		Globals.ArchivesAutoWalkActive = false
+	end)
+end)
 
 
 Toggles.AntiClosetTrash:OnChanged(function(Value)
@@ -5224,6 +5279,10 @@ Groupboxes.Floors_Farming:AddButton({
     end
 })
 
+Groupboxes.Floors_Farming:AddToggle("KnobFarmKill", {
+	Text = "Kill Character", Default = false,
+	Tooltip = "If enabled, Knob Farm kills your character before claiming. Off = claims without dying."
+})
 Groupboxes.Floors_Farming:AddDivider()
 Groupboxes.Floors_Farming:AddButton({
 	Text = "Start Death Farm",
@@ -5265,14 +5324,16 @@ Connections.KnobFarm = Services.RunService.Heartbeat:Connect(function()
 	if Toggles.KnobFarm.Value and Globals.KnobFarmStarted then
 		if not Globals.KnobFarmActive then
 			Globals.KnobFarmActive = true
-			if Functions.CheckCompatability({"replicatesignal"}) then
-				Abysall.Environment.replicatesignal(LocalPlayer.Kill)
-			else
-				LocalPlayer.Character.Humanoid.Health = 0
-			end
-			while task.wait() do
-				if LocalPlayer:GetAttribute("Alive") then
-					break
+			if Toggles.KnobFarmKill.Value then
+				if Functions.CheckCompatability({"replicatesignal"}) then
+					Abysall.Environment.replicatesignal(LocalPlayer.Kill)
+				else
+					LocalPlayer.Character.Humanoid.Health = 0
+				end
+				while task.wait() do
+					if LocalPlayer:GetAttribute("Alive") then
+						break
+					end
 				end
 			end
 			RemotesFolder.Statistics:FireServer()
