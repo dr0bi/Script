@@ -3260,34 +3260,71 @@ Groupboxes.Archives_AutoWalk:AddSlider("ArchivesAutoWalkTeleportEvery", {
 Groupboxes.Archives_AutoWalk:AddSlider("ArchivesAutoWalkStopRoom", {
 	Text = "Stop At Room", Min = 1, Max = 1300, Default = 1300, Rounding = 0, Compact = true
 })
+Groupboxes.Archives_AutoWalk:AddToggle("ArchivesAutoWalkDebug", {
+	Text = "Debug Messages", Default = false,
+	Tooltip = "Shows what Auto Walk is doing in notifications."
+})
 
 Globals.ArchivesAutoWalkActive = false
-local function ArchivesWalkTo(TargetPosition)
+local function AWDebug(Text)
+	if Toggles.ArchivesAutoWalkDebug.Value then
+		Functions.Notify({Title = "[Auto Walk] " .. Text})
+	end
+end
+
+local function ArchivesFindDoor(RoomNumber)
+	local Room = CurrentRooms:FindFirstChild(tostring(RoomNumber))
+	if not Room then return nil, nil end
+	local DoorModel = Room:FindFirstChild("Door")
+	if not DoorModel then return nil, nil end
+	local DoorPart = DoorModel:FindFirstChild("Door") or DoorModel.PrimaryPart or DoorModel:FindFirstChildWhichIsA("BasePart", true)
+	return DoorModel, DoorPart
+end
+
+local function ArchivesWalkTo(DoorModel, DoorPart, RoomNumber)
 	local Root = Character and Character:FindFirstChild("HumanoidRootPart")
-	if not Root or not Humanoid then return end
+	if not Root or not Humanoid then return false end
+	local Target = DoorPart.Position
 	local Path = Services.PathfindingService:CreatePath({
 		AgentCanJump = true, AgentCanClimb = false, WaypointSpacing = 4,
 		AgentRadius = 1.5, AgentHeight = 1.5
 	})
-	local Success = pcall(function() Path:ComputeAsync(Root.Position, TargetPosition) end)
+	local Success = pcall(function() Path:ComputeAsync(Root.Position, Target) end)
 	local Waypoints = Success and Path:GetWaypoints() or {}
 	if #Waypoints == 0 then
-		Humanoid:MoveTo(TargetPosition)
-		local Start = os.clock()
-		while Toggles.ArchivesAutoWalk.Value and os.clock() - Start < 3 and (Root.Position - TargetPosition).Magnitude > 4 do
-			task.wait()
-		end
-		return
+		AWDebug("No path found, walking straight")
+		Waypoints = {{Position = Target, Action = Enum.PathWaypointAction.Walk}}
 	end
+
+	local RoomStart = os.clock()
 	for _, Waypoint in Waypoints do
-		if not Toggles.ArchivesAutoWalk.Value or Humanoid.Health <= 0 then return end
+		if not Toggles.ArchivesAutoWalk.Value or Humanoid.Health <= 0 then return false end
 		if Waypoint.Action == Enum.PathWaypointAction.Jump then Humanoid.Jump = true end
 		Humanoid:MoveTo(Waypoint.Position)
+
 		local Start = os.clock()
-		while Toggles.ArchivesAutoWalk.Value and os.clock() - Start < 2 and (Root.Position - Waypoint.Position).Magnitude > 3 do
+		local LastPos = Root.Position
+		local LastMove = os.clock()
+		while Toggles.ArchivesAutoWalk.Value and (Root.Position - Waypoint.Position).Magnitude > 3 and os.clock() - Start < 3 do
+			if (Root.Position - Target).Magnitude < 40 then
+				pcall(function() DoorModel.ClientOpen:FireServer() end)
+			end
+			if (Root.Position - LastPos).Magnitude > 0.5 then
+				LastPos = Root.Position
+				LastMove = os.clock()
+			elseif os.clock() - LastMove > 1 then
+				Humanoid.Jump = true
+				Humanoid:MoveTo(Waypoint.Position)
+			end
+			-- hard fallback: stuck in this room for too long, teleport to the door
+			if os.clock() - RoomStart > 15 then
+				AWDebug("Stuck, teleporting to door")
+				return false
+			end
 			task.wait()
 		end
 	end
+	return true
 end
 
 Connections.ArchivesAutoWalk = Services.RunService.Heartbeat:Connect(function()
@@ -3298,30 +3335,46 @@ Connections.ArchivesAutoWalk = Services.RunService.Heartbeat:Connect(function()
 		Functions.Notify({Title = "Auto Walk finished at room " .. RoomNumber})
 		return
 	end
-	local Room = CurrentRooms:FindFirstChild(tostring(RoomNumber))
-	local DoorModel = Room and Room:FindFirstChild("Door")
-	local DoorPart = DoorModel and DoorModel:FindFirstChild("Door")
-	if not DoorPart or not Character or not Humanoid or Humanoid.Health <= 0 then return end
+	if not Character or not Humanoid or Humanoid.Health <= 0 then return end
+
+	local DoorModel, DoorPart = ArchivesFindDoor(RoomNumber)
+	if not DoorPart then
+		if Globals.ArchivesAutoWalkLastMissing ~= RoomNumber then
+			Globals.ArchivesAutoWalkLastMissing = RoomNumber
+			AWDebug("No door found in room " .. RoomNumber)
+		end
+		return
+	end
 
 	Globals.ArchivesAutoWalkActive = true
 	task.spawn(function()
-		pcall(function()
+		local OK, Err = pcall(function()
+			AWDebug("Room " .. RoomNumber)
 			local TeleportEvery = Options.ArchivesAutoWalkTeleportEvery.Value
+			local Reached = false
 			if RoomNumber > 0 and RoomNumber % TeleportEvery == 0 then
-				Character:PivotTo(CFrame.new(DoorPart.Position + Vector3.new(0, 3, 0)))
-				task.wait(0.2)
+				AWDebug("Teleporting to door " .. RoomNumber)
 			else
 				DoorPart.CanCollide = false
-				ArchivesWalkTo(DoorPart.Position)
+				Reached = ArchivesWalkTo(DoorModel, DoorPart, RoomNumber)
 			end
-			if DoorModel:FindFirstChild("ClientOpen") then
+			if not Reached and Toggles.ArchivesAutoWalk.Value and Character then
+				Character:PivotTo(CFrame.new(DoorPart.Position + Vector3.new(0, 3, 0)))
+				task.wait(0.2)
+			end
+			for _ = 1, 10 do
 				pcall(function() DoorModel.ClientOpen:FireServer() end)
+				task.wait(0.1)
 			end
 			local Start = os.clock()
 			while Toggles.ArchivesAutoWalk.Value and LatestRoom.Value == RoomNumber and os.clock() - Start < 5 do
 				task.wait()
 			end
+			if LatestRoom.Value == RoomNumber then
+				AWDebug("Door " .. RoomNumber .. " did not open (locked?)")
+			end
 		end)
+		if not OK then AWDebug("Error: " .. tostring(Err)) end
 		Globals.ArchivesAutoWalkActive = false
 	end)
 end)
