@@ -2735,7 +2735,7 @@ Connections.BypassGroundskeeper = Services.RunService.Heartbeat:Connect(function
 	PlatformRayParams.FilterDescendantsInstances = { Character, GroundskeeperPlatform }
 	local Hit = Services.Workspace:Raycast(Root.Position, Vector3.new(0, -100, 0), PlatformRayParams)
 	if Hit then
-		PlatformY = Hit.Position.Y + 1.5
+		PlatformY = Hit.Position.Y + 3.5
 	elseif not PlatformY then
 		PlatformY = Root.Position.Y - 3
 	end
