@@ -3216,38 +3216,83 @@ table.sort(BringPresets)
 
 local function GetBringRoot(Object)
     if not Object then return nil end
-    if Object:IsA("Model") then
+    if Object:IsA("Model") or Object:IsA("BasePart") then
         return Object
-    elseif Object:IsA("BasePart") then
-        return Object
-    elseif Object:IsA("ProximityPrompt") or Object:IsA("ClickDetector") then
-        return Object:FindFirstAncestorOfClass("Model")
-            or Object:FindFirstAncestorWhichIsA("BasePart")
     end
     return Object:FindFirstAncestorOfClass("Model")
         or Object:FindFirstAncestorWhichIsA("BasePart")
+end
+
+local function GetBringPrompt(Object)
+    if not Object then return nil end
+    if Object:IsA("ProximityPrompt") then return Object end
+
+    local Prompt = Object:FindFirstChild("ModulePrompt", true)
+        or Object:FindFirstChildWhichIsA("ProximityPrompt", true)
+    return Prompt
+end
+
+local function IsHeldItemPresent(ObjectName)
+    local Character = LocalPlayer and LocalPlayer.Character
+    local Backpack = LocalPlayer and LocalPlayer:FindFirstChildOfClass("Backpack")
+
+    if Character and Character:FindFirstChild(ObjectName, true) then
+        return true
+    end
+    if Backpack and Backpack:FindFirstChild(ObjectName, true) then
+        return true
+    end
+    return false
 end
 
 local function BringObject(Object, RootPart)
     local Target = GetBringRoot(Object)
     if not Target or not RootPart then return false end
 
+    local Prompt = GetBringPrompt(Target)
+
+    -- Move the actual pickup model/part first.
+    local Moved = false
     if Target:IsA("Model") then
-        pcall(function() Target:PivotTo(RootPart.CFrame) end)
-        return true
+        Moved = pcall(function() Target:PivotTo(RootPart.CFrame * CFrame.new(0, 0, -2)) end)
     elseif Target:IsA("BasePart") then
-        pcall(function() Target.CFrame = RootPart.CFrame end)
-        return true
+        Moved = pcall(function() Target.CFrame = RootPart.CFrame * CFrame.new(0, 0, -2) end)
     end
-    return false
+
+    if not Moved then return false end
+
+    -- A client-side teleport alone does not necessarily count as picking the item up.
+    -- If the item exposes a prompt, trigger that prompt after moving it nearby.
+    if Prompt and Prompt:IsA("ProximityPrompt") then
+        task.defer(function()
+            pcall(function()
+                Functions.ForceFirePrompt(Prompt)
+            end)
+        end)
+    end
+
+    return true
 end
 
 local function FindBringObjects(ObjectName)
     local Results = {}
     local Seen = {}
+
     local function ScanRoot(Root)
         if not Root then return end
+
         for _, Object in Root:GetDescendants() do
+            if Object.Name == ObjectName then
+                local Target = GetBringRoot(Object)
+                if Target and not Seen[Target] then
+                    Seen[Target] = true
+                    table.insert(Results, Target)
+                end
+            end
+        end
+
+        -- Some drops are direct children and may not be represented by a named descendant.
+        for _, Object in Root:GetChildren() do
             if Object.Name == ObjectName then
                 local Target = GetBringRoot(Object)
                 if Target and not Seen[Target] then
@@ -3279,20 +3324,32 @@ Groupboxes.Stairwell_Experimental:AddButton({
         local ObjectName = Selected and BringPresetMap[Selected]
         local Character = LocalPlayer and LocalPlayer.Character
         local RootPart = Character and Character:FindFirstChild("HumanoidRootPart")
+
         if not ObjectName or not RootPart then
             Functions.Notify({ Title = "Bring Preset", Body = "Select a preset and make sure your character is loaded." })
             return
         end
 
+        local ObjectsFound = FindBringObjects(ObjectName)
         local Count = 0
-        for _, Object in ipairs(FindBringObjects(ObjectName)) do
+        local PromptCount = 0
+
+        for _, Object in ipairs(ObjectsFound) do
+            local Prompt = GetBringPrompt(Object)
             if BringObject(Object, RootPart) then
                 Count += 1
+                if Prompt then PromptCount += 1 end
             end
         end
+
+        task.wait(0.15)
+        local Held = IsHeldItemPresent(ObjectName)
+
         Functions.Notify({
             Title = "Bring Preset",
-            Body = Count > 0 and ("Brought " .. tostring(Count) .. "x " .. Selected .. ".") or ("No " .. Selected .. " found.")
+            Body = Count > 0
+                and string.format("Moved %dx %s and triggered %d prompt(s). %s", Count, Selected, PromptCount, Held and "Item detected in inventory." or "The game may require server-side pickup handling.")
+                or ("No " .. Selected .. " found.")
         })
     end,
     DoubleClick = false
@@ -3310,15 +3367,22 @@ Groupboxes.Stairwell_Experimental:AddButton({
         end
 
         local Count = 0
+        local PromptCount = 0
         for _, Object in ipairs(Drops:GetChildren()) do
+            local Prompt = GetBringPrompt(Object)
             if BringObject(Object, RootPart) then
                 Count += 1
+                if Prompt then PromptCount += 1 end
             end
         end
-        Functions.Notify({ Title = "Bring Dropped Items", Body = "Brought " .. tostring(Count) .. " dropped item(s)." })
+
+        Functions.Notify({
+            Title = "Bring Dropped Items",
+            Body = string.format("Moved %d dropped item(s); triggered %d prompt(s).", Count, PromptCount)
+        })
     end,
     DoubleClick = false,
-    Tooltip = "Brings all dropped items."
+    Tooltip = "Moves dropped items close to you and attempts their pickup prompt."
 })
 
 Groupboxes.Stairwell_Experimental:AddToggle("AntiNoise", { Text = "Anti Noise", Default = false, Tooltip = "Prevents the game from making noise when moving (Visual studio auto ai lmfao ✌)." })
