@@ -3918,6 +3918,49 @@ Groupboxes.Stairwell_Experimental:AddButton({
     Tooltip = "Moves dropped items close to you and attempts their pickup prompt."
 })
 
+Groupboxes.Stairwell_Experimental:AddButton({
+    Text = "Bring All Items",
+    Func = function()
+        local Character = LocalPlayer and LocalPlayer.Character
+        local RootPart = Character and Character:FindFirstChild("HumanoidRootPart")
+        if not RootPart then
+            Functions.Notify({ Title = "Bring All Items", Body = "Make sure your character is loaded." })
+            return
+        end
+
+        local Targets, Seen = {}, {}
+        for _, RootName in ipairs({ "Drops", "CurrentRooms" }) do
+            local Root = workspace:FindFirstChild(RootName)
+            if Root then
+                for _, Object in Root:GetDescendants() do
+                    if ItemNames[Object.Name] then
+                        local Target = GetBringRoot(Object)
+                        if Target and not Seen[Target] then
+                            Seen[Target] = true
+                            table.insert(Targets, Target)
+                        end
+                    end
+                end
+            end
+        end
+
+        local Count = 0
+        for Index, Target in ipairs(Targets) do
+            if BringObject(Target, RootPart) then
+                Count += 1
+            end
+            if Index % 10 == 0 then task.wait() end
+        end
+
+        Functions.Notify({
+            Title = "Bring All Items",
+            Body = Count > 0 and string.format("Moved %d item(s) to you and triggered their prompts.", Count) or "No items found."
+        })
+    end,
+    DoubleClick = false,
+    Tooltip = "Brings every item found in the loaded rooms and drops to you and tries to pick them up."
+})
+
 Groupboxes.Stairwell_Experimental:AddToggle("AntiNoise", { Text = "Anti Noise", Default = false, Tooltip = "Prevents the game from making noise when moving (Visual studio auto ai lmfao ✌)." })
 
 Toggles.AntiNoise:OnChanged(function(value)
