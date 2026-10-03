@@ -3918,6 +3918,10 @@ Groupboxes.Stairwell_Experimental:AddButton({
     Tooltip = "Moves dropped items close to you and attempts their pickup prompt."
 })
 
+Groupboxes.Stairwell_Experimental:AddSlider("BringDropDelay", {
+    Text = "Drop Delay", Suffix = "s", Min = 0, Max = 3, Default = 0.3, Rounding = 2, Compact = true,
+    Tooltip = "How long Bring All Items waits after returning before dropping the item."
+})
 Groupboxes.Stairwell_Experimental:AddButton({
     Text = "Bring All Items",
     Func = function()
@@ -3944,19 +3948,53 @@ Groupboxes.Stairwell_Experimental:AddButton({
             end
         end
 
-        -- The server only accepts a pickup when YOU are close to the item's real position,
-        -- so instead of moving the items we visit each one, pick it up, then return.
+        -- Only one item can be held at a time, so for each item: teleport to it, wait 0.18s,
+        -- pick it up, go back to the starting spot, wait "Drop Delay", then drop it.
+        local Backpack = LocalPlayer:FindFirstChildOfClass("Backpack")
+        local function Snapshot()
+            local Tools = {}
+            for _, Child in Character:GetChildren() do
+                if Child:IsA("Tool") then Tools[Child] = true end
+            end
+            if Backpack then
+                for _, Child in Backpack:GetChildren() do
+                    if Child:IsA("Tool") then Tools[Child] = true end
+                end
+            end
+            return Tools
+        end
+
         local Origin = RootPart.CFrame
         local Count = 0
         for _, Target in ipairs(Targets) do
             if not Target.Parent or not Character.Parent or not RootPart.Parent then break end
             local Prompt = GetBringPrompt(Target)
             if Prompt and Prompt:IsA("ProximityPrompt") and Prompt.Enabled then
+                local Before = Snapshot()
                 pcall(function() Character:PivotTo(Target:GetPivot()) end)
-                task.wait(0.1)
+                task.wait(0.18)
                 pcall(function() Functions.ForceFirePrompt(Prompt) end)
-                task.wait(0.15)
-                Count += 1
+
+                local NewTool
+                local Start = os.clock()
+                repeat
+                    task.wait()
+                    for Tool in Snapshot() do
+                        if not Before[Tool] then NewTool = Tool break end
+                    end
+                until NewTool or os.clock() - Start > 1
+
+                pcall(function() Character:PivotTo(Origin) end)
+
+                if NewTool then
+                    Count += 1
+                    task.wait(Options.BringDropDelay.Value)
+                    pcall(function() RemotesFolder.DropItem:FireServer(NewTool) end)
+                    local DropStart = os.clock()
+                    while NewTool.Parent and (NewTool.Parent == Character or NewTool.Parent == Backpack) and os.clock() - DropStart < 1 do
+                        task.wait()
+                    end
+                end
             end
         end
         pcall(function() Character:PivotTo(Origin) end)
@@ -3967,7 +4005,7 @@ Groupboxes.Stairwell_Experimental:AddButton({
         })
     end,
     DoubleClick = false,
-    Tooltip = "Visits every item in the loaded rooms and drops, picks it up, then returns you to where you were."
+    Tooltip = "For each item: teleports to it, picks it up, returns to your spot and drops it there. One item at a time."
 })
 
 Groupboxes.Stairwell_Experimental:AddToggle("AntiNoise", { Text = "Anti Noise", Default = false, Tooltip = "Prevents the game from making noise when moving (Visual studio auto ai lmfao ✌)." })
