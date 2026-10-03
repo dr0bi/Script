@@ -2219,6 +2219,24 @@ Groupboxes.Self_Misc:AddButton({
 		end
 	end
 })
+Groupboxes.Self_Misc:AddButton({
+	Text = "Heal 50 HP",
+	Tooltip = "Adds 50 HP to your health (up to your max health).",
+	Func = function()
+		if Humanoid and Humanoid.Health > 0 then
+			Humanoid.Health = math.min(Humanoid.MaxHealth, Humanoid.Health + 50)
+		end
+	end
+})
+Groupboxes.Self_Misc:AddButton({
+	Text = "Subtract 25 HP",
+	Tooltip = "Subtracts 25 HP from your health.",
+	Func = function()
+		if Humanoid and Humanoid.Health > 0 then
+			Humanoid.Health = math.max(0, Humanoid.Health - 25)
+		end
+	end
+})
 Groupboxes.Debug = Tabs.General:AddRightGroupbox("Debug")
 Groupboxes.Debug:AddButton({
 	Text = "Void",
