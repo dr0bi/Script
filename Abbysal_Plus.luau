@@ -2712,6 +2712,28 @@ Groupboxes.General_Health:AddToggle("AutoHealToggle", {
 Groupboxes.General_Health:AddSlider("AutoHealThreshold", {
 	Text = "Heal Below HP", Min = 1, Max = 100, Default = 50, Rounding = 0, Compact = true
 })
+local GodModeHealth = 9999999999999999999999999
+local GodModeOriginalMax = 100
+Groupboxes.General_Health:AddToggle("GodModeToggle", {
+	Text = "God Mode", Default = false,
+	Tooltip = "Sets your max health and health to an extremely high value. Turning it off restores your normal max health.",
+	Callback = function(Value)
+		if not Value and Humanoid then
+			Humanoid.MaxHealth = GodModeOriginalMax
+			Humanoid.Health = math.min(Humanoid.Health, GodModeOriginalMax)
+		end
+	end
+})
+Connections.GodMode = Services.RunService.Heartbeat:Connect(function()
+	if not Toggles.GodModeToggle.Value then return end
+	if Humanoid and Humanoid.Health > 0 then
+		if Humanoid.MaxHealth ~= GodModeHealth then
+			GodModeOriginalMax = Humanoid.MaxHealth
+			Humanoid.MaxHealth = GodModeHealth
+		end
+		Humanoid.Health = GodModeHealth
+	end
+end)
 local LastAutoHeal = 0
 Connections.AutoHeal = Services.RunService.Heartbeat:Connect(function()
 	if not Toggles.AutoHealToggle.Value then return end
