@@ -987,6 +987,7 @@ function Nofitication:Notify(nofdebug, middledebug, all)
     WindowTitle.Size = UDim2.new(0, 222, 0, 22)
     WindowTitle.ZIndex = 4
     WindowTitle.Font = Enum.Font.GothamSemibold
+    WindowTitle.RichText = true
     WindowTitle.Text = nofdebug.Title
     WindowTitle.TextColor3 = Color3.fromRGB(220, 220, 220)
     WindowTitle.TextSize = 12.000
@@ -1721,7 +1722,7 @@ Functions.GetRandomCode = function()
 end
 
 local Window = Library:CreateWindow({
-	Title = "Abbysal Plus",
+	Title = "Abbysal <font color='rgb(0, 200, 255)'>Plus</font>",
 	Footer = "Beta 0.01",
 	NotifySide = "Right",
 	ShowCustomCursor = false,
