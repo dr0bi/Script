@@ -3944,21 +3944,30 @@ Groupboxes.Stairwell_Experimental:AddButton({
             end
         end
 
+        -- The server only accepts a pickup when YOU are close to the item's real position,
+        -- so instead of moving the items we visit each one, pick it up, then return.
+        local Origin = RootPart.CFrame
         local Count = 0
-        for Index, Target in ipairs(Targets) do
-            if BringObject(Target, RootPart) then
+        for _, Target in ipairs(Targets) do
+            if not Target.Parent or not Character.Parent or not RootPart.Parent then break end
+            local Prompt = GetBringPrompt(Target)
+            if Prompt and Prompt:IsA("ProximityPrompt") and Prompt.Enabled then
+                pcall(function() Character:PivotTo(Target:GetPivot()) end)
+                task.wait(0.1)
+                pcall(function() Functions.ForceFirePrompt(Prompt) end)
+                task.wait(0.15)
                 Count += 1
             end
-            if Index % 10 == 0 then task.wait() end
         end
+        pcall(function() Character:PivotTo(Origin) end)
 
         Functions.Notify({
             Title = "Bring All Items",
-            Body = Count > 0 and string.format("Moved %d item(s) to you and triggered their prompts.", Count) or "No items found."
+            Body = Count > 0 and string.format("Picked up %d item(s).", Count) or "No items found."
         })
     end,
     DoubleClick = false,
-    Tooltip = "Brings every item found in the loaded rooms and drops to you and tries to pick them up."
+    Tooltip = "Visits every item in the loaded rooms and drops, picks it up, then returns you to where you were."
 })
 
 Groupboxes.Stairwell_Experimental:AddToggle("AntiNoise", { Text = "Anti Noise", Default = false, Tooltip = "Prevents the game from making noise when moving (Visual studio auto ai lmfao ✌)." })
