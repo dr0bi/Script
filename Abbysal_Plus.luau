@@ -1840,6 +1840,83 @@ Groupboxes.Optimization_Settings:AddButton({
 	end
 })
 
+Groupboxes.Optimization_Rooms = Tabs.Optimization:AddLeftGroupbox("Rooms")
+Groupboxes.Optimization_Rooms:AddToggle("OptimizationLimitRooms", {
+	Text = "Leave Only Rooms",
+	Default = false,
+	Tooltip = "Deletes old rooms behind you on your client and keeps only the chosen number of latest rooms."
+})
+Groupboxes.Optimization_Rooms:AddSlider("OptimizationKeepRooms", {
+	Text = "Rooms To Keep", Min = 1, Max = 10, Default = 3, Rounding = 0, Compact = true,
+	Tooltip = "How many of the latest rooms (including the current one) stay loaded."
+})
+Groupboxes.Optimization_Rooms:AddToggle("OptimizationNoDecals", {
+	Text = "Remove Decals & Textures",
+	Default = false,
+	Tooltip = "Deletes decals and textures in rooms (cannot be undone for rooms already processed)."
+})
+Groupboxes.Optimization_Rooms:AddToggle("OptimizationNoPartShadows", {
+	Text = "Disable Part Shadows",
+	Default = false,
+	Tooltip = "Turns off shadow casting on parts in rooms."
+})
+
+local function OptTrimRooms()
+	if not Toggles.OptimizationLimitRooms.Value or not CurrentRooms then return end
+	local Keep = Options.OptimizationKeepRooms.Value
+	local Latest = LatestRoom.Value
+	for _, Room in CurrentRooms:GetChildren() do
+		local Number = tonumber(Room.Name)
+		if Number and Number <= Latest - Keep then
+			-- never delete a room you are standing in
+			local Inside = false
+			if RootPart and RootPart.Parent then
+				local Ok, CF, Size = pcall(function() return Room:GetBoundingBox() end)
+				if Ok and Size then
+					local Local = CF:PointToObjectSpace(RootPart.Position)
+					Inside = math.abs(Local.X) < Size.X / 2 + 5 and math.abs(Local.Y) < Size.Y / 2 + 5 and math.abs(Local.Z) < Size.Z / 2 + 5
+				end
+			end
+			if not Inside then pcall(function() Room:Destroy() end) end
+		end
+	end
+end
+
+local function OptProcessRoom(Room)
+	local NoDecals = Toggles.OptimizationNoDecals.Value
+	local NoShadows = Toggles.OptimizationNoPartShadows.Value
+	if not NoDecals and not NoShadows then return end
+	for _, Object in Room:GetDescendants() do
+		if NoDecals and (Object:IsA("Decal") or Object:IsA("Texture")) then
+			pcall(function() Object:Destroy() end)
+		elseif NoShadows and Object:IsA("BasePart") and Object.CastShadow then
+			Object.CastShadow = false
+		end
+	end
+end
+
+local function OptProcessAllRooms()
+	if not CurrentRooms then return end
+	for _, Room in CurrentRooms:GetChildren() do
+		task.spawn(OptProcessRoom, Room)
+	end
+end
+Toggles.OptimizationNoDecals:OnChanged(OptProcessAllRooms)
+Toggles.OptimizationNoPartShadows:OnChanged(OptProcessAllRooms)
+Toggles.OptimizationLimitRooms:OnChanged(OptTrimRooms)
+Options.OptimizationKeepRooms:OnChanged(OptTrimRooms)
+
+if CurrentRooms then
+	Connections.OptimizationRoomAdded = CurrentRooms.ChildAdded:Connect(function(Room)
+		task.wait(0.5) -- let the room finish loading
+		if Room.Parent then OptProcessRoom(Room) end
+		OptTrimRooms()
+	end)
+end
+Connections.OptimizationLatestRoom = LatestRoom.Changed:Connect(function()
+	task.defer(OptTrimRooms)
+end)
+
 Toggles.OptimizationToggle:OnChanged(function(Value)
 	if not Functions.CheckCompatability({"setfpscap"}) then
 		return
@@ -2712,15 +2789,16 @@ Groupboxes.General_AntiVoid:AddSlider("AntiVoidStep", {
 
 local AVRoot, AVLast, AVSafe, AVLockCF
 local function AntiVoidStep()
-	local Root = Character and Character:FindFirstChild("HumanoidRootPart")
+	-- cheapest check first: do nothing at all while both toggles are off
+	local Lock = Toggles.AntiVoidLock.Value
+	if not Lock and not Toggles.AntiVoidToggle.Value then
+		if AVRoot then AVRoot, AVLast, AVSafe, AVLockCF = nil, nil, nil, nil end
+		return
+	end
+	local Root = (RootPart and RootPart.Parent) and RootPart or (Character and Character:FindFirstChild("HumanoidRootPart"))
 	if not Root or not Humanoid then AVRoot = nil return end
 	if Root ~= AVRoot then
 		AVRoot, AVLast, AVSafe, AVLockCF = Root, nil, nil, nil
-	end
-	local Lock = Toggles.AntiVoidLock.Value
-	if not Lock and not Toggles.AntiVoidToggle.Value then
-		AVLast, AVSafe, AVLockCF = nil, nil, nil
-		return
 	end
 	if Lock then
 		AVLockCF = AVLockCF or Root.CFrame
@@ -3279,9 +3357,10 @@ Groupboxes.Archives_Bypasses:AddToggle("AntiScribbles", { Text = "Bypass Scribbl
 Groupboxes.Archives_Experimental = Tabs.Archives:AddLeftGroupbox("Experimental")
 Groupboxes.Archives_Experimental:AddToggle("ArchivesAutoWalk", {
 	Text = "Auto Doors", Default = false,
-	Tooltip = "Pathfinds to each door and opens it. If you get stuck, teleports you to the door."
+	Tooltip = "Pathfinds to each door and opens it. When stuck it marks the spot to path around it, and teleports to the door after several retries."
 })
 Groupboxes.Archives_Experimental:AddSlider("ArchivesAutoWalkTimeout", { Text = "Pathfind Timeout", Min = 0.5, Max = 3, Default = 1, Rounding = 1 })
+Groupboxes.Archives_Experimental:AddSlider("ArchivesAutoWalkRetries", { Text = "Stuck Retries", Min = 0, Max = 5, Default = 2, Rounding = 0, Tooltip = "How many times to re-path around a stuck spot before teleporting to the door. 0 = teleport immediately." })
 
 Globals.ArchivesAutoWalkActive = false
 Connections.ArchivesAutoWalk = Services.RunService.Heartbeat:Connect(function()
@@ -3300,7 +3379,7 @@ Connections.ArchivesAutoWalk = Services.RunService.Heartbeat:Connect(function()
 			DoorPart.CanCollide = false
 			local Path = Services.PathfindingService:CreatePath({
 				AgentCanJump = true, AgentCanClimb = false, WaypointSpacing = 4,
-				AgentRadius = 1.5, AgentHeight = 1.5
+				AgentRadius = 1.5, AgentHeight = 1.5, Costs = { StuckPart = 8 }
 			})
 			local Computed = pcall(function() Path:ComputeAsync(RootPart.Position, DoorPart.Position) end)
 			local Waypoints = Computed and Path:GetWaypoints() or {}
@@ -3328,10 +3407,33 @@ Connections.ArchivesAutoWalk = Services.RunService.Heartbeat:Connect(function()
 			end
 			Humanoid:MoveTo(RootPart.Position)
 
-			-- stuck: teleport to the next door
 			if Stuck and Toggles.ArchivesAutoWalk.Value and Character then
-				Character:PivotTo(CFrame.new(DoorPart.Position + Vector3.new(0, 3, 0)))
-				task.wait(0.2)
+				if Globals.ArchivesStuckRoom ~= RoomNumber then
+					Globals.ArchivesStuckRoom = RoomNumber
+					Globals.ArchivesStuckCount = 0
+				end
+				Globals.ArchivesStuckCount += 1
+
+				-- mark the stuck spot so the next path goes around it
+				local StuckBlock = Instance.new("Part", Globals.RoomsNodesFolder)
+				StuckBlock.Transparency = 1
+				StuckBlock.Size = Vector3.one
+				StuckBlock.CFrame = RootPart.CFrame
+				StuckBlock.Shape = Enum.PartType.Ball
+				StuckBlock.CanCollide = false
+				StuckBlock.Anchored = true
+				StuckBlock.Name = "StuckPart"
+				local Modifier = Instance.new("PathfindingModifier", StuckBlock)
+				Modifier.Label = "StuckPart"
+
+				if Globals.ArchivesStuckCount > Options.ArchivesAutoWalkRetries.Value then
+					-- retries used up: teleport to the next door
+					Globals.ArchivesStuckCount = 0
+					Character:PivotTo(CFrame.new(DoorPart.Position + Vector3.new(0, 3, 0)))
+					task.wait(0.2)
+				else
+					return -- try again with a new path around the marker
+				end
 			end
 
 			if Toggles.ArchivesAutoWalk.Value then
@@ -3347,6 +3449,11 @@ Connections.ArchivesAutoWalk = Services.RunService.Heartbeat:Connect(function()
 		end)
 		Globals.ArchivesAutoWalkActive = false
 	end)
+end)
+Connections.ArchivesStuckClear = CurrentRooms.ChildAdded:Connect(function()
+	for _, Object in Globals.RoomsNodesFolder:GetChildren() do
+		if Object.Name == "StuckPart" then Object:Destroy() end
+	end
 end)
 
 
@@ -4155,6 +4262,91 @@ Toggles.RemoveSurge:OnChanged(function(Value)
 	end
 end)
 
+Groupboxes.Exploits_Markers = Tabs.Exploits:AddRightGroupbox("Teleport Markers")
+local TeleportMarker, MarkerCFrame
+
+local function SetMarker(Where)
+	if TeleportMarker then TeleportMarker:Destroy() end
+	MarkerCFrame = Where
+	local Part = Instance.new("Part")
+	Part.Name = "TeleportMarker"
+	Part.Shape = Enum.PartType.Ball
+	Part.Size = Vector3.new(1, 1, 1)
+	Part.Color = Color3.fromRGB(0, 255, 0)
+	Part.Material = Enum.Material.Neon
+	Part.Anchored = true
+	Part.CanCollide = false
+	Part.CanQuery = false
+	Part.CanTouch = false
+	Part.CastShadow = false
+	Part.CFrame = Where * CFrame.new(0, -2, 0) -- roughly at your feet
+	local Gui = Instance.new("BillboardGui")
+	Gui.Size = UDim2.fromOffset(14, 14)
+	Gui.AlwaysOnTop = true
+	Gui.Parent = Part
+	local Dot = Instance.new("Frame")
+	Dot.Size = UDim2.fromScale(1, 1)
+	Dot.BackgroundColor3 = Color3.fromRGB(0, 255, 0)
+	Dot.BorderSizePixel = 0
+	Dot.Parent = Gui
+	Instance.new("UICorner", Dot).CornerRadius = UDim.new(1, 0)
+	Part.Parent = workspace
+	TeleportMarker = Part
+end
+
+local function RemoveMarker()
+	if TeleportMarker then TeleportMarker:Destroy() end
+	TeleportMarker, MarkerCFrame = nil, nil
+end
+Library:OnUnload(RemoveMarker)
+
+local function CreateMarker()
+	local Root = RootPart
+	if not Root or not Root.Parent then
+		Functions.Notify({ Title = "Teleport Markers", Body = "Make sure your character is loaded." })
+		return
+	end
+	SetMarker(Root.CFrame)
+end
+
+local function TeleportToMarker()
+	local Root = RootPart
+	if not Root or not Root.Parent or not Character then
+		Functions.Notify({ Title = "Teleport Markers", Body = "Make sure your character is loaded." })
+		return
+	end
+	if not MarkerCFrame then
+		Functions.Notify({ Title = "Teleport Markers", Body = "Create a marker first." })
+		return
+	end
+	local Destination, Previous = MarkerCFrame, Root.CFrame
+	Character:PivotTo(Destination)
+	Root.AssemblyLinearVelocity = Vector3.zero
+	-- keep Anti-Void from undoing this teleport
+	AVLast = nil
+	if AVLockCF then AVLockCF = Destination end
+	SetMarker(Previous)
+end
+
+Groupboxes.Exploits_Markers:AddButton({
+	Text = "Create Marker",
+	Tooltip = "Places a green marker where you stand. Walk anywhere, then teleport back to it.",
+	Func = CreateMarker
+})
+Groupboxes.Exploits_Markers:AddButton({
+	Text = "Teleport to Marker",
+	Tooltip = "Teleports you to the marker. A new marker is created where you were, so you can jump back.",
+	Func = TeleportToMarker
+})
+Groupboxes.Exploits_Markers:AddLabel("Create Marker key"):AddKeyPicker("CreateMarkerKey", { Default = "J", Mode = "Press", NoUI = true, Text = "Create Marker" })
+Groupboxes.Exploits_Markers:AddLabel("Teleport key"):AddKeyPicker("TeleportMarkerKey", { Default = "K", Mode = "Press", NoUI = true, Text = "Teleport to Marker" })
+Options.CreateMarkerKey:OnClick(CreateMarker)
+Options.TeleportMarkerKey:OnClick(TeleportToMarker)
+Groupboxes.Exploits_Markers:AddButton({
+	Text = "Remove Marker",
+	Func = RemoveMarker
+})
+
 Groupboxes.Exploits_Audio = Tabs.Exploits:AddLeftGroupbox("Audio")
 Globals.JamMuffle = Services.SoundService:WaitForChild("Main"):FindFirstChild("Jamming") or Instance.new("EqualizerSoundEffect")
 
@@ -4243,6 +4435,64 @@ Toggles.RemoveCutscenes:OnChanged(function(Value)
         end
     end
 end)
+
+Groupboxes.Visuals_Camera:AddDivider()
+Groupboxes.Visuals_Camera:AddToggle("FreeCamToggle", { Text = "Free Cam", Default = false, Tooltip = "Detaches the camera so you can fly around while your character stays in place. WASD move, E/Q up/down, Shift = faster." })
+Toggles.FreeCamToggle:AddKeyPicker("FreeCamKey", { Text = "Free Cam", Default = "P", Mode = "Toggle", SyncToggleState = true })
+Groupboxes.Visuals_Camera:AddSlider("FreeCamSpeed", { Text = "Free Cam Speed", Min = 5, Max = 200, Default = 40, Rounding = 0, Compact = true })
+
+local FreeCamPos, FreeCamPitch, FreeCamYaw
+local FreeCamRunning = false
+local function FreeCamSink() return Enum.ContextActionResult.Sink end
+
+local function StopFreeCam()
+	if not FreeCamRunning then return end
+	FreeCamRunning = false
+	pcall(function() Services.RunService:UnbindFromRenderStep("AbysallFreeCam") end)
+	pcall(function() Services.ContextActionService:UnbindAction("AbysallFreeCamSink") end)
+	Services.UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+	local Cam = workspace.CurrentCamera
+	if Cam then
+		Cam.CameraType = Enum.CameraType.Custom
+		if Humanoid then Cam.CameraSubject = Humanoid end
+	end
+end
+
+local function StartFreeCam()
+	local Cam = workspace.CurrentCamera
+	if FreeCamRunning or not Cam then return end
+	FreeCamRunning = true
+	FreeCamPos = Cam.CFrame.Position
+	FreeCamPitch, FreeCamYaw = Cam.CFrame:ToOrientation()
+	Cam.CameraType = Enum.CameraType.Scriptable
+	Services.UserInputService.MouseBehavior = Enum.MouseBehavior.LockCenter
+	-- swallow movement keys so the character doesn't walk while flying the camera
+	Services.ContextActionService:BindActionAtPriority("AbysallFreeCamSink", FreeCamSink, false, 3000,
+		Enum.KeyCode.W, Enum.KeyCode.A, Enum.KeyCode.S, Enum.KeyCode.D,
+		Enum.KeyCode.E, Enum.KeyCode.Q, Enum.KeyCode.Space, Enum.KeyCode.LeftShift)
+	Services.RunService:BindToRenderStep("AbysallFreeCam", Enum.RenderPriority.Camera.Value + 1, function(Delta)
+		local Camera = workspace.CurrentCamera
+		if not Camera then return end
+		if Camera.CameraType ~= Enum.CameraType.Scriptable then Camera.CameraType = Enum.CameraType.Scriptable end
+		local UIS = Services.UserInputService
+		local MouseDelta = UIS:GetMouseDelta()
+		FreeCamYaw = FreeCamYaw - MouseDelta.X * 0.0025
+		FreeCamPitch = math.clamp(FreeCamPitch - MouseDelta.Y * 0.0025, -1.55, 1.55)
+		local Rotation = CFrame.fromOrientation(FreeCamPitch, FreeCamYaw, 0)
+		local Forward = (UIS:IsKeyDown(Enum.KeyCode.S) and 1 or 0) - (UIS:IsKeyDown(Enum.KeyCode.W) and 1 or 0)
+		local Side = (UIS:IsKeyDown(Enum.KeyCode.D) and 1 or 0) - (UIS:IsKeyDown(Enum.KeyCode.A) and 1 or 0)
+		local Up = (UIS:IsKeyDown(Enum.KeyCode.E) and 1 or 0) - (UIS:IsKeyDown(Enum.KeyCode.Q) and 1 or 0)
+		local Speed = Options.FreeCamSpeed.Value * (UIS:IsKeyDown(Enum.KeyCode.LeftShift) and 3 or 1)
+		local Move = Rotation:VectorToWorldSpace(Vector3.new(Side, 0, Forward)) + Vector3.new(0, Up, 0)
+		FreeCamPos = FreeCamPos + Move * Speed * Delta
+		Camera.CFrame = CFrame.new(FreeCamPos) * Rotation
+	end)
+end
+
+Toggles.FreeCamToggle:OnChanged(function(Value)
+	if Value then StartFreeCam() else StopFreeCam() end
+end)
+Library:OnUnload(StopFreeCam)
 
 Groupboxes.Visuals_Effects = Groupboxes.Visuals_LeftTab:AddTab("Effects")
 Groupboxes.Visuals_Effects:AddToggle("TransparentHidingSpotsToggle", { Text = "Transparent Hiding Spots", Default = false, Tooltip = "Makes a hiding spot transparent when you enter it." })
