@@ -4148,16 +4148,35 @@ Groupboxes.Exploits_BypassRight:AddToggle("PositionSpoof", {
 Groupboxes.Exploits_BypassRight:AddToggle("CrouchSpoof", {
 	Text = "Crouch Spoof", Default = false, Tooltip = "Makes the game think you are always crouching."
 })
+-- Position Spoof Plus: pushes the spoof twice as deep (2x the normal offset)
+Groupboxes.Exploits_BypassRight:AddToggle("PositionSpoofPlus", {
+	Text = "Position Spoof Plus", Default = false,
+	Tooltip = "Makes Position Spoof go twice as deep (about 4.7 studs instead of 2.3). Turns Position Spoof on automatically."
+})
+local function SpoofPlusExtra() return Toggles.PositionSpoofPlus.Value and 2.346 or 0 end
+-- extra depth applied right now (only while Position Spoof itself is on)
+local function SpoofEx() return Toggles.PositionSpoof.Value and SpoofPlusExtra() or 0 end
+
 Toggles.PositionSpoof:OnChanged(function(Value)
 	if Floor ~= "Fools" and Floor ~= "OldHotel" then
+		local Depth = 2.346 + SpoofPlusExtra()
 		if Value then
-			RootPart.CFrame = RootPart.CFrame * CFrame.new(0, -2.346, 0)
+			RootPart.CFrame = RootPart.CFrame * CFrame.new(0, -Depth, 0)
 			Humanoid.HipHeight = 0.05
 			RemotesFolder.Crouch:FireServer(true, true)
 		else
-			RootPart.CFrame = RootPart.CFrame * CFrame.new(0, 2.346, 0)
+			RootPart.CFrame = RootPart.CFrame * CFrame.new(0, Depth, 0)
 			Humanoid.HipHeight = 2.396
 		end
+	end
+end)
+Toggles.PositionSpoofPlus:OnChanged(function(Value)
+	if Floor == "Fools" or Floor == "OldHotel" then return end
+	if Value and not Toggles.PositionSpoof.Value then
+		Toggles.PositionSpoof:SetValue(true) -- applies the full (doubled) depth by itself
+	elseif Toggles.PositionSpoof.Value then
+		-- already spoofed: move deeper / back up by the extra amount
+		RootPart.CFrame = RootPart.CFrame * CFrame.new(0, Value and -2.346 or 2.346, 0)
 	end
 end)
 Toggles.PositionSpoof:AddKeyPicker("PositionSpoof", {
@@ -4279,7 +4298,7 @@ local function SetMarker(Where)
 	Part.CanQuery = false
 	Part.CanTouch = false
 	Part.CastShadow = false
-	Part.CFrame = Where * CFrame.new(0, -2, 0) -- roughly at your feet
+	Part.CFrame = Where * CFrame.new(0, 1.5, 0) -- at head level
 	local Gui = Instance.new("BillboardGui")
 	Gui.Size = UDim2.fromOffset(14, 14)
 	Gui.AlwaysOnTop = true
@@ -4319,13 +4338,12 @@ local function TeleportToMarker()
 		Functions.Notify({ Title = "Teleport Markers", Body = "Create a marker first." })
 		return
 	end
-	local Destination, Previous = MarkerCFrame, Root.CFrame
+	local Destination = MarkerCFrame
 	Character:PivotTo(Destination)
 	Root.AssemblyLinearVelocity = Vector3.zero
 	-- keep Anti-Void from undoing this teleport
 	AVLast = nil
 	if AVLockCF then AVLockCF = Destination end
-	SetMarker(Previous)
 end
 
 Groupboxes.Exploits_Markers:AddButton({
@@ -4335,7 +4353,7 @@ Groupboxes.Exploits_Markers:AddButton({
 })
 Groupboxes.Exploits_Markers:AddButton({
 	Text = "Teleport to Marker",
-	Tooltip = "Teleports you to the marker. A new marker is created where you were, so you can jump back.",
+	Tooltip = "Teleports you to the marker. The marker stays where it is.",
 	Func = TeleportToMarker
 })
 Groupboxes.Exploits_Markers:AddLabel("Create Marker key"):AddKeyPicker("CreateMarkerKey", { Default = "J", Mode = "Press", NoUI = true, Text = "Create Marker" })
@@ -6013,25 +6031,25 @@ Functions.HandleCharacter = function(NewCharacter)
 			end
 
 			if Character:FindFirstChild("LowerTorso") and Character.LowerTorso:FindFirstChild("Root") then
-				Character.LowerTorso.Root.C1 = Globals.OriginalC1 * CFrame.new(0, Toggles.PositionSpoof.Value and -2.346 or 0, 0)
+				Character.LowerTorso.Root.C1 = Globals.OriginalC1 * CFrame.new(0, Toggles.PositionSpoof.Value and -(2.346 + SpoofEx()) or 0, 0)
 			end
 
-			local SpoofY = Toggles.PositionSpoof.Value and 2.328 or 0.18
+			local SpoofY = Toggles.PositionSpoof.Value and (2.328 + SpoofEx()) or 0.18
 			Collision.Position     = RootPart.Position + Vector3.new(0, SpoofY, 0)
 			CollisionPart.Position = RootPart.Position + Vector3.new(0, SpoofY, 0)
 
 			if Collision:FindFirstChild("CollisionCrouch") and CollisionClone:FindFirstChild("CollisionCrouch") then
-				local CrouchY = Toggles.PositionSpoof.Value and 1.328 or -0.982
+				local CrouchY = Toggles.PositionSpoof.Value and (1.328 + SpoofEx()) or -0.982
 				Collision.CollisionCrouch.Position = RootPart.Position + Vector3.new(0, CrouchY, 0)
 				CollisionClone.CollisionCrouch.CollisionGroup = Collision.CollisionCrouch.CollisionGroup
 			end
 			if CollisionClone:FindFirstChild("CollisionCrouch") then
-				CollisionClone.CollisionCrouch.Position = RootPart.Position + Vector3.new(0, Toggles.PositionSpoof.Value and 0.75 or -0.982, 0)
+				CollisionClone.CollisionCrouch.Position = RootPart.Position + Vector3.new(0, Toggles.PositionSpoof.Value and (0.75 + SpoofEx()) or -0.982, 0)
 			end
 		end
 
 		CollisionClone.CollisionGroup = Collision.CollisionGroup
-		CollisionClone.Position = RootPart.Position + Vector3.new(0, Toggles.PositionSpoof.Value and 1.75 or 0.18, 0)
+		CollisionClone.Position = RootPart.Position + Vector3.new(0, Toggles.PositionSpoof.Value and (1.75 + SpoofEx()) or 0.18, 0)
 
 		if Toggles.VelocityManipulationToggle.Value and Options.VelocityManipulationMode.Value == "Velocity" then
 			Globals.ManipulateBody.Parent = RootPart
@@ -6154,7 +6172,7 @@ Functions.HandleCharacter = function(NewCharacter)
 
 	task.wait(1)
 	if Toggles.PositionSpoof.Value and Floor ~= "Fools" and Floor ~= "OldHotel" then
-		RootPart.CFrame = RootPart.CFrame * CFrame.new(0, -2.346, 0)
+		RootPart.CFrame = RootPart.CFrame * CFrame.new(0, -(2.346 + SpoofPlusExtra()), 0)
 		Humanoid.HipHeight = 0.05
 		RemotesFolder.Crouch:FireServer(true, true)
 	end
