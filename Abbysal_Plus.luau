@@ -4340,8 +4340,17 @@ Groupboxes.Exploits_Markers:AddButton({
 })
 Groupboxes.Exploits_Markers:AddLabel("Create Marker key"):AddKeyPicker("CreateMarkerKey", { Default = "J", Mode = "Press", NoUI = true, Text = "Create Marker" })
 Groupboxes.Exploits_Markers:AddLabel("Teleport key"):AddKeyPicker("TeleportMarkerKey", { Default = "K", Mode = "Press", NoUI = true, Text = "Teleport to Marker" })
-Options.CreateMarkerKey:OnClick(CreateMarker)
-Options.TeleportMarkerKey:OnClick(TeleportToMarker)
+-- fires once per key press only (not while typing in chat, not while rebinding the key)
+Connections.MarkerKeys = Services.UserInputService.InputBegan:Connect(function(Input, Processed)
+	if Processed or Input.UserInputType ~= Enum.UserInputType.Keyboard then return end
+	if Options.CreateMarkerKey.Picking or Options.TeleportMarkerKey.Picking then return end
+	local KeyName = Input.KeyCode.Name
+	if KeyName == Options.CreateMarkerKey.Value then
+		CreateMarker()
+	elseif KeyName == Options.TeleportMarkerKey.Value then
+		TeleportToMarker()
+	end
+end)
 Groupboxes.Exploits_Markers:AddButton({
 	Text = "Remove Marker",
 	Func = RemoveMarker
