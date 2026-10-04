@@ -987,7 +987,6 @@ function Nofitication:Notify(nofdebug, middledebug, all)
     WindowTitle.Size = UDim2.new(0, 222, 0, 22)
     WindowTitle.ZIndex = 4
     WindowTitle.Font = Enum.Font.GothamSemibold
-    WindowTitle.RichText = true
     WindowTitle.Text = nofdebug.Title
     WindowTitle.TextColor3 = Color3.fromRGB(220, 220, 220)
     WindowTitle.TextSize = 12.000
@@ -1722,7 +1721,7 @@ Functions.GetRandomCode = function()
 end
 
 local Window = Library:CreateWindow({
-	Title = "Abbysal <font color='rgb(0, 200, 255)'>Plus</font>",
+	Title = "Abbysal Plus",
 	Footer = "Beta 0.01",
 	NotifySide = "Right",
 	ShowCustomCursor = false,
@@ -3278,6 +3277,77 @@ Groupboxes.Archives_Bypasses:AddToggle("BypassDrones",         { Text = "Bypass 
 Groupboxes.Archives_Bypasses:AddToggle("AntiScribbles", { Text = "Bypass Scribbles", Default = false, Tooltip = "Prevents 'Scribbles' from attacking you." })
 
 Groupboxes.Archives_Experimental = Tabs.Archives:AddLeftGroupbox("Experimental")
+Groupboxes.Archives_Experimental:AddToggle("ArchivesAutoWalk", {
+	Text = "Auto Doors", Default = false,
+	Tooltip = "Pathfinds to each door and opens it. If you get stuck, teleports you to the door."
+})
+Groupboxes.Archives_Experimental:AddSlider("ArchivesAutoWalkTimeout", { Text = "Pathfind Timeout", Min = 0.5, Max = 3, Default = 1, Rounding = 1 })
+
+Globals.ArchivesAutoWalkActive = false
+Connections.ArchivesAutoWalk = Services.RunService.Heartbeat:Connect(function()
+	if not Toggles.ArchivesAutoWalk.Value or Globals.ArchivesAutoWalkActive then return end
+	if not Character or not Humanoid or not RootPart or Humanoid.Health <= 0 then return end
+
+	local RoomNumber = LatestRoom.Value
+	local Room = CurrentRooms:FindFirstChild(tostring(RoomNumber))
+	local DoorModel = Room and Room:FindFirstChild("Door")
+	local DoorPart = DoorModel and (DoorModel:FindFirstChild("Door") or DoorModel.PrimaryPart)
+	if not DoorPart then return end
+
+	Globals.ArchivesAutoWalkActive = true
+	task.spawn(function()
+		pcall(function()
+			DoorPart.CanCollide = false
+			local Path = Services.PathfindingService:CreatePath({
+				AgentCanJump = true, AgentCanClimb = false, WaypointSpacing = 4,
+				AgentRadius = 1.5, AgentHeight = 1.5
+			})
+			local Computed = pcall(function() Path:ComputeAsync(RootPart.Position, DoorPart.Position) end)
+			local Waypoints = Computed and Path:GetWaypoints() or {}
+
+			-- no path at all counts as stuck
+			local Stuck = #Waypoints == 0
+			for _, Waypoint in Waypoints do
+				if Stuck or not Toggles.ArchivesAutoWalk.Value or Humanoid.Health <= 0 then break end
+				if Waypoint.Action == Enum.PathWaypointAction.Jump then Humanoid.Jump = true end
+				Humanoid:MoveTo(Waypoint.Position)
+
+				local Start = tick()
+				while Toggles.ArchivesAutoWalk.Value do
+					local Flat = Vector3.new(Waypoint.Position.X - RootPart.Position.X, 0, Waypoint.Position.Z - RootPart.Position.Z)
+					if Flat.Magnitude <= 4 then break end
+					if (RootPart.Position - DoorPart.Position).Magnitude < 40 then
+						pcall(function() DoorModel.ClientOpen:FireServer() end)
+					end
+					if tick() - Start > Options.ArchivesAutoWalkTimeout.Value then
+						Stuck = true
+						break
+					end
+					task.wait()
+				end
+			end
+			Humanoid:MoveTo(RootPart.Position)
+
+			-- stuck: teleport to the next door
+			if Stuck and Toggles.ArchivesAutoWalk.Value and Character then
+				Character:PivotTo(CFrame.new(DoorPart.Position + Vector3.new(0, 3, 0)))
+				task.wait(0.2)
+			end
+
+			if Toggles.ArchivesAutoWalk.Value then
+				for _ = 1, 10 do
+					pcall(function() DoorModel.ClientOpen:FireServer() end)
+					task.wait(0.1)
+				end
+				local Start = tick()
+				while Toggles.ArchivesAutoWalk.Value and LatestRoom.Value == RoomNumber and tick() - Start < 5 do
+					task.wait()
+				end
+			end
+		end)
+		Globals.ArchivesAutoWalkActive = false
+	end)
+end)
 
 
 
