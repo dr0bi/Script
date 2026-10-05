@@ -1,0 +1,1 @@
+loadstring(game:HttpGet("https://raw.githubusercontent.com/dr0bi/AbbysalPlus/main/Launcher.luau"))()
